@@ -1,0 +1,49 @@
+✅ #1     4.2s  How many customers are there?
+✅ #2     4.7s  List the company names of all customers in Germany.
+✅ #3     4.6s  What are the 5 most expensive products and their prices?
+✅ #4     4.5s  Which products are discontinued?
+✅ #5     4.7s  Which countries do our suppliers come from?
+✅ #6     4.6s  Which products are out of stock?
+✅ #7     4.9s  What is the average unit price of all products?
+✅ #8     5.0s  List employees whose title is 'Sales Representative'.
+✅ #9     4.2s  How many products cost more than 50?
+✅ #10    4.7s  Which customers have 'Restaurant' in their company name?
+✅ #11    5.0s  How many order line items are there in total?
+✅ #12    9.5s  Which products need reordering (units in stock at or below the reorder level) and are not discontinued?
+✅ #13    5.3s  List each product with its category name.
+✅ #14    5.2s  How many products are in each category?
+✅ #15    5.9s  How many customers are there per country? Sort from most to least.
+✅ #16    4.7s  Which countries have more than 5 customers?
+✅ #17    5.0s  How many orders has each employee handled? Show full name.
+✅ #18    4.9s  How many orders did each shipper deliver?
+✅ #19    4.5s  List the names of products supplied by companies in Japan.
+✅ #20    4.6s  What is the total revenue of order 10248?
+✅ #21    3.8s  How many orders were placed in 2016?
+✅ #22    4.1s  How many orders were shipped after their required date?
+✅ #23    4.2s  How many orders have not been shipped yet?
+✅ #24    6.1s  Who does each employee report to?
+✅ #25    4.5s  Which employees have nobody reporting to them?
+✅ #26    5.3s  What is the average freight cost per ship country? Top 10 highest.
+❌ #27    7.4s  Which employees have sold products from the 'Seafood' category? (distinct names)
+✅ #28    6.6s  Which products are priced above the average product price?
+✅ #29    7.4s  Who are the top 5 customers by total revenue?
+✅ #30    7.5s  What is the total revenue per category?
+✅ #31    7.6s  Show total revenue by year.
+✅ #32    7.3s  What are the 10 best-selling products by quantity sold?
+✅ #33    6.8s  For each category, what is the most expensive product?
+✅ #34    5.9s  Which employee generated the most revenue? Show their full name as a single column and the revenue.
+✅ #35    5.0s  Which customers have placed more than 200 orders?
+✅ #36    5.4s  What is the average number of days between order date and ship date, per shipper?
+❌ #37    7.7s  What percentage of total revenue does each category represent?
+❌ #38   47.9s  For each country, who is the top customer by revenue?
+✅ #39    6.2s  Show the monthly number of orders in 2020, with month formatted as 'YYYY-MM'.
+❌ #40    5.2s  Which suppliers provide products in more than one category?
+✅ #41    9.9s  What was the year-over-year revenue growth (%) for each year?
+✅ #42    3.9s  How many customers are in the USA?
+✅ #43    4.8s  List the products in the beverages category.
+
+===== Stage 1: single agent =====
+Accuracy : 91%  (39/43)
+LLM calls: 4.1 avg / question
+Time     : 6.5s avg / question
+Failed   : [27, 37, 38, 40]
