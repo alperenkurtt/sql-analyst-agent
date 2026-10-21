@@ -71,7 +71,13 @@ if __name__ == "__main__":
 
     cases = CASES[: args.limit]
     df = evaluate(
-        lambda q: run_sql_agent({"question": q}, config={"callbacks": [langfuse_handler()]}),
+        lambda q: run_sql_agent(
+            {"question": q},
+            config={
+                "callbacks": [langfuse_handler()],
+                "metadata": {"langfuse_user_id": "eval", "langfuse_tags": ["eval"]},
+            },
+        ),
         cases,
     )
     summarize(df, "Stage 1: single agent")

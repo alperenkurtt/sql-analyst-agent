@@ -1,5 +1,5 @@
 import html
-
+import uuid
 import streamlit as st
 
 from src.agents.chart_agent import build_figure
@@ -13,12 +13,18 @@ PLACEHOLDER = "Ask a question about your data..."
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 def run_pipeline(question: str) -> State:
     with st.status("Fetching the data...", expanded=False) as status:
         for mode, chunk in graph.stream(
             {"question": question},
-            config=pipeline_config(),
+            config=pipeline_config(
+                user_id="streamlit-anonymous",
+                session_id=st.session_state.session_id,
+                tags=["streamlit"],
+            ),
             stream_mode=["updates", "values"],
         ):
             if mode == "updates" and "sql" in chunk:

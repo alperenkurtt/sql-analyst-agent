@@ -5,6 +5,7 @@ from src.agents.chart_agent import needs_chart, run_chart_agent
 from src.agents.report_agent import run_report_agent
 from src.agents.sql_agent import run_sql_agent
 from src.state import State
+from config.settings import settings
 
 
 def route_chart(state: State) -> str:
@@ -24,6 +25,15 @@ builder.add_edge("chart", END)
 
 graph = builder.compile()
 
+APP_NAME = "sql_analyst"
 
-def pipeline_config() -> dict:
-    return {"callbacks": [langfuse_handler()], "run_name": "sql_analyst"}
+def pipeline_config(user_id: str, session_id: str | None = None, tags: list[str] | None = None) -> dict:
+    metadata = {
+        "app_name": APP_NAME,
+        "model": settings.MODEL_NAME,
+        "langfuse_user_id": user_id,
+        "langfuse_tags": [APP_NAME, *(tags or [])],
+    }
+    if session_id:
+        metadata["langfuse_session_id"] = session_id
+    return {"callbacks": [langfuse_handler()], "run_name": APP_NAME, "metadata": metadata}
