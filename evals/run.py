@@ -7,6 +7,7 @@ from evals.cases import CASES
 from src.agents.sql_agent import run_sql_agent
 from src.tools.db_tools import query_df
 from src.state import State
+from config.llm import langfuse, langfuse_handler
 
 
 def results_match(pred_df, gold_df):
@@ -69,5 +70,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     cases = CASES[: args.limit]
-    df = evaluate(lambda q: vars(run_sql_agent(State(question=q), verbose=False)), cases)
+    df = evaluate(
+        lambda q: run_sql_agent({"question": q}, config={"callbacks": [langfuse_handler()]}),
+        cases,
+    )
     summarize(df, "Stage 1: single agent")
+    langfuse.flush()

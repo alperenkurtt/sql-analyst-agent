@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     DATABASE_PATH: Path = PROJECT_ROOT / "data" / "northwind.db"
     CURRENCY: str = "USD"
 
+    #langfuse
+    LANGFUSE_SECRET_KEY: str
+    LANGFUSE_PUBLIC_KEY: str
+    LANGFUSE_BASE_URL: str = "https://cloud.langfuse.com"
+    LANGFUSE_PROJECT_NAME: str = "sql-analyst-agent"
+
 
 settings = Settings()
 

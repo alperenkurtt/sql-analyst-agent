@@ -1,6 +1,9 @@
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langdetect import DetectorFactory, LangDetectException, detect
+from langchain_core.runnables import RunnableConfig
 
-from config.llm import chat
+from config.llm import llm
 from config.settings import settings
 from src.state import State
 
@@ -8,7 +11,7 @@ DetectorFactory.seed = 0
 LANG_NAMES = {"tr": "Turkish", "en": "English"}
 
 MAX_ROWS = 50
-FLOAT_FORMAT = lambda x: f"{x:,.2f}"  # 1.88e+07 yerine 18,823,200.00 → LLM büyüklüğü yanlış okumasın
+FLOAT_FORMAT = lambda x: f"{x:,.2f}"
 
 SYSTEM_PROMPT = """
 You are a report agent. You receive a user's question and the data that answers it.
@@ -21,9 +24,21 @@ Write a short, clear answer to the question using ONLY the given data.
 - Do not mention SQL, tables or columns; write for a business user.
 """
 
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("human", (
+        "Question: {question}\n\n"
+        "Data:\n{data}\n\n"
+        "All monetary values are in {currency}.\n"
+        "Answer in {language}."
+    )),
+])
+
+chain = (prompt | llm | StrOutputParser()).with_config(run_name="report_agent")
+
+
 def data_to_text(state: State) -> str:
-    """Küçük tablo → tamamı. Büyük tablo → ilk MAX_ROWS satır + toplam satır sayısı + describe()."""
-    df = state.data
+    df = state.get("data")
     if df is None or df.empty:
         return "No data (0 rows)."
 
@@ -36,26 +51,22 @@ def data_to_text(state: State) -> str:
         f"Summary statistics of all rows:\n{df.describe().to_string(float_format=FLOAT_FORMAT)}"
     )
 
+
 def detect_language(text: str) -> str:
     try:
         return LANG_NAMES.get(detect(text), "English")
     except LangDetectException:
         return "English"
 
-def run_report_agent(state: State) -> State:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": (
-            f"Question: {state.question}\n\n"
-            f"Data:\n{data_to_text(state)}\n\n"
-            f"All monetary values are in {settings.CURRENCY}.\n"
-            f"Answer in {detect_language(state.question)}."
-        )},
-    ]
-    response = chat(
-        state,
-        messages=messages,
-        temperature=0,
+
+def run_report_agent(state: State, config: RunnableConfig | None = None) -> dict:
+    report = chain.invoke(
+        {
+            "question": state["question"],
+            "data": data_to_text(state),
+            "currency": settings.CURRENCY,
+            "language": detect_language(state["question"]),
+        },
+        config=config,
     )
-    state.report = response.choices[0].message.content
-    return state
+    return {"report": report, "llm_calls": 1}

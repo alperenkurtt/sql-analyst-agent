@@ -1,16 +1,12 @@
-from dataclasses import dataclass
+import operator
+from typing import Annotated, TypedDict
 
 import pandas as pd
 
-@dataclass
-class State:
+class State(TypedDict, total=False):
     question: str
-    sql: str | None = None
-    data: pd.DataFrame | None = None
-    report: str | None = None
-    chart: dict | None = None
-    llm_calls: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    cost_usd: float = 0.0
-    llm_seconds: float = 0.0
+    sql: str | None
+    data: pd.DataFrame | None
+    report: str | None
+    chart: dict | None
+    llm_calls: Annotated[int, operator.add]

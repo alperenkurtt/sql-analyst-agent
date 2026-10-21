@@ -2,6 +2,7 @@ import sqlite3
 from contextlib import closing
 
 import pandas as pd
+from langchain.tools import tool
 
 from config.settings import settings
 
@@ -16,15 +17,15 @@ def _quote(name: str) -> str:
     return f'"{name}"' if " " in name else name
 
 
-def _connect(db_path=DB_PATH):
+def _connect():
     """Open a read-only connection so the agent can never modify the database."""
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    return sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
 
 
-def _table_names(db_path=DB_PATH) -> list[str]:
+def _table_names() -> list[str]:
     """Return the names of all user tables in the database."""
     placeholders = ",".join("?" * len(EXCLUDED_TABLES))
-    with closing(_connect(db_path)) as conn:
+    with closing(_connect()) as conn:
         rows = conn.execute(
             f"SELECT name FROM sqlite_master WHERE type='table' "
             f"AND name NOT IN ({placeholders}) ORDER BY name",
@@ -33,21 +34,42 @@ def _table_names(db_path=DB_PATH) -> list[str]:
     return [r[0] for r in rows]
 
 
-# --- Tools ---
+def query_df(query: str) -> pd.DataFrame:
+    """Run a read-only SELECT query and return a DataFrame. Raises on error (for code, not for the LLM)."""
+    if not query.strip().upper().startswith(("SELECT", "WITH")):
+        raise ValueError("only SELECT queries are allowed.")
+    with closing(_connect()) as conn:
+        return pd.read_sql_query(query, conn)
 
-def list_tables(db_path=DB_PATH) -> str:
-    """Return the table names as a comma-separated string."""
-    return ", ".join(_quote(t) for t in _table_names(db_path))
+
+# --- Tools (the LLM sees the docstrings below as tool descriptions) ---
+
+@tool
+def list_tables() -> str:
+    """List all tables in the SQLite database.
+
+    Call this first when you don't know the schema yet,
+    then use describe_table on the tables relevant to the question.
+    """
+    return ", ".join(_quote(t) for t in _table_names())
 
 
-def describe_table(table_name: str, db_path=DB_PATH) -> str:
-    """Return the columns, types, primary keys and foreign key relations of a table."""
+@tool(parse_docstring=True)
+def describe_table(table_name: str) -> str:
+    """Show the columns, types, primary keys and foreign keys of a table.
+
+    Use the foreign keys to figure out how to JOIN tables.
+    Call this for every table you plan to use before writing SQL.
+
+    Args:
+        table_name: Exact table name as returned by list_tables, e.g. Orders or Order Details.
+    """
     table_name = table_name.strip('"')
-    tables = _table_names(db_path)
+    tables = _table_names()
     if table_name not in tables:
         return f"Error: table '{table_name}' does not exist. Available tables: {', '.join(tables)}"
 
-    with closing(_connect(db_path)) as conn:
+    with closing(_connect()) as conn:
         # (cid, name, type, notnull, dflt_value, pk)
         columns = conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
         # (id, seq, table, from, to, on_update, on_delete, match)
@@ -66,18 +88,19 @@ def describe_table(table_name: str, db_path=DB_PATH) -> str:
     return "\n".join(lines)
 
 
-def query_df(query: str, db_path=DB_PATH) -> pd.DataFrame:
-    """Run a read-only SELECT query and return a DataFrame. Raises on error (for code, not for the LLM)."""
-    if not query.strip().upper().startswith(("SELECT", "WITH")):
-        raise ValueError("only SELECT queries are allowed.")
-    with closing(_connect(db_path)) as conn:
-        return pd.read_sql_query(query, conn)
+@tool(parse_docstring=True)
+def run_sql(query: str) -> str:
+    """Execute a read-only SQL query (SQLite dialect) and return the result as text.
 
+    Only SELECT/WITH queries are allowed. At most 50 rows are returned,
+    so aggregate or use LIMIT instead of fetching raw rows.
+    If the result starts with 'Error:', fix the query and try again.
 
-def run_sql(query: str, db_path=DB_PATH) -> str:
-    """Tool for the LLM: run the query and return the first MAX_ROWS rows as text. Never raises."""
+    Args:
+        query: A single SQLite SELECT statement. Quote table names with spaces: "Order Details".
+    """
     try:
-        df = query_df(query, db_path)
+        df = query_df(query)
     except Exception as e:
         # Returned to the LLM so it can fix its own query
         return f"Error: {e}"
@@ -97,71 +120,4 @@ def run_sql(query: str, db_path=DB_PATH) -> str:
     return text
 
 
-# --- Schemas ---
-
-TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "list_tables",
-            "description": (
-                "List all tables in the SQLite database. "
-                "Call this first when you don't know the schema yet, "
-                "then use describe_table on the tables relevant to the question."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "describe_table",
-            "description": (
-                "Show the columns, types, primary keys and foreign keys of a table. "
-                "Use the foreign keys to figure out how to JOIN tables. "
-                "Call this for every table you plan to use before writing SQL."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "table_name": {
-                        "type": "string",
-                        "description": "Exact table name as returned by list_tables, e.g. Orders or Order Details."
-                    }
-                },
-                "required": ["table_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_sql",
-            "description": (
-                "Execute a read-only SQL query (SQLite dialect) and return the result as text. "
-                f"Only SELECT/WITH queries are allowed. At most {MAX_ROWS} rows are returned, "
-                "so aggregate or use LIMIT instead of fetching raw rows. "
-                "If the result starts with 'Error:', fix the query and try again."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": 'A single SQLite SELECT statement. Quote table names with spaces: "Order Details".'
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    }
-]
-
-TOOLS = {
-    "list_tables": list_tables,
-    "describe_table": describe_table,
-    "run_sql": run_sql,
-}
+TOOLS = [list_tables, describe_table, run_sql]

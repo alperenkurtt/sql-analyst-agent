@@ -1,27 +1,21 @@
-import time
-
-from openai import OpenAI
+from langchain_openai import ChatOpenAI
+from langfuse import Langfuse
+from langfuse.langchain import CallbackHandler
 from config.settings import settings
 
-client = OpenAI(
-    base_url=settings.OPENROUTER_BASE_URL,
-    api_key=settings.OPENROUTER_API_KEY,
+langfuse = Langfuse(
+    public_key=settings.LANGFUSE_PUBLIC_KEY,
+    secret_key=settings.LANGFUSE_SECRET_KEY,
+    base_url=settings.LANGFUSE_BASE_URL,
 )
 
+llm = ChatOpenAI(
+    model=settings.MODEL_NAME,
+    base_url=settings.OPENROUTER_BASE_URL,
+    api_key=settings.OPENROUTER_API_KEY,
+    temperature=0,
+)
 
-def chat(state, **kwargs):
-    """Tüm LLM çağrıları buradan geçer: çağır, ölç, state'e yaz."""
-    start = time.perf_counter()
-    response = client.chat.completions.create(
-        model=settings.MODEL_NAME,
-        extra_body={"usage": {"include": True}},
-        **kwargs,
-    )
-    state.llm_seconds += time.perf_counter() - start
-
-    usage = response.usage
-    state.llm_calls += 1
-    state.prompt_tokens += usage.prompt_tokens
-    state.completion_tokens += usage.completion_tokens
-    state.cost_usd += getattr(usage, "cost", None) or 0.0  # başka sağlayıcıda alan yoksa 0
-    return response
+def langfuse_handler() -> CallbackHandler:
+    """New handler per pipeline run: logs each LangChain step to Langfuse."""
+    return CallbackHandler()

@@ -11,3 +11,7 @@ pydantic-settings
 langdetect
 plotly
 streamlit
+langchain
+langchain-openai
+langgraph
+langfuse

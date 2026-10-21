@@ -1,9 +1,13 @@
-import json
 import sys
 
-from config.llm import chat
-from src.tools.db_tools import TOOL_SCHEMAS, TOOLS, query_df
+from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
+
+from config.llm import langfuse, langfuse_handler, llm
 from src.state import State
+from src.tools.db_tools import TOOLS, query_df
 
 MAX_STEPS = 10
 
@@ -21,63 +25,62 @@ Data notes:
 - Assume today's date is 2023-10-28 for relative time expressions ("this year", "last month").
 - Revenue = UnitPrice * Quantity * (1 - Discount), computed from "Order Details".
 - Questions may be in other languages; translate terms to the English values stored in the database
-  (e.g. 'Almanya' -> 'Germany').
+(e.g. 'Almanya' -> 'Germany').
 """
 
-def run_sql_agent(state: State, verbose: bool = True) -> State:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": state.question},
-    ]
-    last_sql = None  # son BAŞARILI run_sql sorgusu → eval bununla puanlanacak
+agent = create_agent(
+    model=llm,
+    tools=TOOLS,
+    system_prompt=SYSTEM_PROMPT,
+    middleware=[ModelCallLimitMiddleware(run_limit=MAX_STEPS)],
+    name="sql_agent",
+)
 
-    for step in range(1, MAX_STEPS + 1):
-        # 1) LLM'e konuşmanın tamamını + tool menüsünü gönder
-        response = chat(
-            state,
-            messages=messages,
-            tools=TOOL_SCHEMAS,
-            temperature=0,
-        )
-        msg = response.choices[0].message
+def last_successful_sql(messages) -> str | None:
+    results = {m.tool_call_id: m.content for m in messages if isinstance(m, ToolMessage)}
+    last_sql = None
+    for m in messages:
+        if not isinstance(m, AIMessage):
+            continue
+        for call in m.tool_calls:
+            if call["name"] == "run_sql" and not results.get(call["id"], "Error").startswith("Error"):
+                last_sql = call["args"]["query"]
+    return last_sql
 
-        # 2) LLM'in cevabını geçmişe ekle (tool_calls dahil, yoksa API sonraki adımda hata verir)
-        messages.append(msg.model_dump(exclude_none=True))
 
-        # 3) Tool istemediyse: LLM "bitti" dedi
-        if not msg.tool_calls:
-            break
-
-        # 4) İstenen her tool'u çalıştır, sonucu geri ver
-        for tool_call in msg.tool_calls:
-            name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments or "{}")  # argümanlar JSON string gelir
-
-            if name in TOOLS:
-                result = TOOLS[name](**args)
-            else:
-                result = f"Error: unknown tool '{name}'"
-
-            if name == "run_sql" and not result.startswith("Error"):
-                last_sql = args["query"]
-
-            if verbose:
-                print(f"[{step}] 🔧 {name}({args})")
+def print_steps(messages) -> None:
+    results = {m.tool_call_id: m.content for m in messages if isinstance(m, ToolMessage)}
+    step = 0
+    for m in messages:
+        if isinstance(m, AIMessage) and m.tool_calls:
+            step += 1
+            for call in m.tool_calls:
+                result = results.get(call["id"], "")
+                print(f"[{step}] 🔧 {call['name']}({call['args']})")
                 print(f"     ↳ {result[:200]}{'...' if len(result) > 200 else ''}")
+                
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,  # hangi isteğin cevabı olduğunu eşler
-                "content": result,
-            })
+def run_sql_agent(state: State, config: RunnableConfig | None = None, verbose: bool = False) -> dict:
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": state["question"]}]},
+        config=config,
+    )
+    messages = result["messages"]
 
-    # LLM'e kırpılmış metin gitti; state'e kırpılmamış DataFrame koyuyoruz
-    state.sql = last_sql
-    state.data = query_df(last_sql) if last_sql else None
-    return state
+    if verbose:
+        print_steps(messages)
+
+    sql = last_successful_sql(messages)
+    return {
+        "sql": sql,
+        "data": query_df(sql) if sql else None,
+        "llm_calls": sum(isinstance(m, AIMessage) for m in messages),
+    }
+
 
 if __name__ == "__main__":
     question = " ".join(sys.argv[1:]) or "2023 yılında en çok ciro yapan 5 ürün hangisi?"
     print(f"❓ {question}\n")
-    state = run_sql_agent(State(question=question))
-    print(f"📊 SQL: {state.sql}\n📋 Data:\n{state.data}\n📞 LLM calls: {state.llm_calls}")
+    out = run_sql_agent({"question": question}, config={"callbacks": [langfuse_handler()]}, verbose=True)
+    print(f"\n📊 SQL: {out['sql']}\n📋 Data:\n{out['data']}\n📞 LLM calls: {out['llm_calls']}")
+    langfuse.flush()
