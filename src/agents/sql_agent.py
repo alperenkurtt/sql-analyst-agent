@@ -10,6 +10,7 @@ from src.state import State
 from src.tools.db_tools import TOOLS, query_df
 
 MAX_STEPS = 10
+MAX_HISTORY = 5
 
 SYSTEM_PROMPT = """
 You are a data agent working on a SQLite database (Northwind).
@@ -58,14 +59,21 @@ def print_steps(messages) -> None:
                 result = results.get(call["id"], "")
                 print(f"[{step}] 🔧 {call['name']}({call['args']})")
                 print(f"     ↳ {result[:200]}{'...' if len(result) > 200 else ''}")
-                
+
+
+def build_messages(state: State) -> list[dict]:
+    messages = []
+    for turn in state.get("history", [])[-MAX_HISTORY:]:
+        messages.append({"role": "user", "content": turn["question"]})
+        messages.append({"role": "assistant", "content": f"Final SQL:\n{turn['sql']}"})
+    messages.append({"role": "user", "content": state["question"]})
+    return messages
+
 
 def run_sql_agent(state: State, config: RunnableConfig | None = None, verbose: bool = False) -> dict:
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": state["question"]}]},
-        config=config,
-    )
-    messages = result["messages"]
+    input_messages = build_messages(state)
+    result = agent.invoke({"messages": input_messages}, config=config)
+    messages = result["messages"][len(input_messages):]
 
     if verbose:
         print_steps(messages)
@@ -75,6 +83,7 @@ def run_sql_agent(state: State, config: RunnableConfig | None = None, verbose: b
         "sql": sql,
         "data": query_df(sql) if sql else None,
         "llm_calls": sum(isinstance(m, AIMessage) for m in messages),
+        "history": [{"question": state["question"], "sql": sql}] if sql else [],
     }
 
 

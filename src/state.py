@@ -10,3 +10,4 @@ class State(TypedDict, total=False):
     report: str | None
     chart: dict | None
     llm_calls: Annotated[int, operator.add]
+    history: Annotated[list[dict], operator.add]

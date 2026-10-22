@@ -6,6 +6,10 @@ from src.agents.report_agent import run_report_agent
 from src.agents.sql_agent import run_sql_agent
 from src.state import State
 from config.settings import settings
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.types import Overwrite
+import uuid
 
 
 def route_chart(state: State) -> str:
@@ -23,9 +27,12 @@ builder.add_conditional_edges("sql", route_chart, ["chart", END])
 builder.add_edge("report", END)
 builder.add_edge("chart", END)
 
-graph = builder.compile()
+graph = builder.compile(checkpointer=InMemorySaver(serde=JsonPlusSerializer(pickle_fallback=True)))
 
 APP_NAME = "sql_analyst"
+
+def turn_input(question: str) -> dict:
+    return {"question": question, "chart": None, "llm_calls": Overwrite(0)}
 
 def pipeline_config(user_id: str, session_id: str | None = None, tags: list[str] | None = None) -> dict:
     metadata = {
@@ -36,4 +43,9 @@ def pipeline_config(user_id: str, session_id: str | None = None, tags: list[str]
     }
     if session_id:
         metadata["langfuse_session_id"] = session_id
-    return {"callbacks": [langfuse_handler()], "run_name": APP_NAME, "metadata": metadata}
+    return {
+        "callbacks": [langfuse_handler()],
+        "run_name": APP_NAME,
+        "metadata": metadata,
+        "configurable": {"thread_id": session_id or str(uuid.uuid4())},
+    }
