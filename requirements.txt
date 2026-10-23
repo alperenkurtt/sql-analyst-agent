@@ -1,12 +1,6 @@
 openai 
 pandas 
-voyageai 
-matplotlib 
-seaborn 
 python-dotenv 
-sqlparse
-ipython
-ipykernel
 pydantic-settings
 langdetect
 plotly

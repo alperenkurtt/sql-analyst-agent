@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     LANGFUSE_BASE_URL: str = "https://cloud.langfuse.com"
     LANGFUSE_PROJECT_NAME: str = "sql-analyst-agent"
 
+    # Demo
+    DEMO_ACCESS_CODE: str = ""
+    MAX_QUESTIONS_PER_SESSION: int = 5
+
 
 settings = Settings()
 

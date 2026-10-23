@@ -1,7 +1,9 @@
+import hmac
 import html
 import uuid
 import streamlit as st
 
+from config.settings import settings
 from src.agents.chart_agent import build_figure
 from src.graph import graph, pipeline_config, turn_input
 from src.state import State
@@ -26,6 +28,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+def check_access() -> None:
+    """Ask for the demo access code once per session; stop rendering until it is correct."""
+    if not settings.DEMO_ACCESS_CODE or st.session_state.get("authorized"):
+        return
+    st.markdown("<div style='height: 25vh'></div>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center'>Demo access</h2>", unsafe_allow_html=True)
+    code = st.text_input("Access code", type="password")
+    if code:
+        if hmac.compare_digest(code, settings.DEMO_ACCESS_CODE):
+            st.session_state.authorized = True
+            st.rerun()
+        st.error("Wrong access code.")
+    st.stop()
+
+check_access()
+
 PLACEHOLDER = "Ask a question about your data..."
 
 if "chats" not in st.session_state:
@@ -35,8 +53,11 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
 st.session_state.messages = st.session_state.chats.setdefault(st.session_state.session_id, [])
+questions_left = settings.MAX_QUESTIONS_PER_SESSION - sum(len(m) for m in st.session_state.chats.values())
+limit_reached = questions_left <= 0
 
 with st.sidebar:
+    st.caption(f"Demo: {max(questions_left, 0)} questions left")
     if st.button("New chat", use_container_width=True):
         st.session_state.session_id = str(uuid.uuid4())
         st.rerun()
@@ -87,9 +108,11 @@ if not st.session_state.messages:
     with st.container():
         st.markdown("<div style='height: 30vh'></div>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align: center'>What would you like to know?</h2>", unsafe_allow_html=True)
-        question = st.chat_input(PLACEHOLDER)
+        question = st.chat_input(PLACEHOLDER, disabled=limit_reached)
 else:
-    question = st.chat_input(PLACEHOLDER)
+    question = st.chat_input(PLACEHOLDER, disabled=limit_reached)
+    if limit_reached:
+        st.info("Demo limit reached. Thanks for trying it out!")
 
     for msg in st.session_state.messages:
         st.markdown(
