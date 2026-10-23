@@ -4,6 +4,10 @@ Ask a question about your data in plain language. Get back the answer, a chart, 
 
 This project is a small multi-agent system that works on the Northwind sample database. It understands questions in English and Turkish.
 
+**Live demo: [alperenkurt-sql.streamlit.app](https://alperenkurt-sql.streamlit.app)**
+
+The demo runs on a paid model, so it is protected by an access code. If you would like to try it, contact me and I will send you one. See [Deployment](#deployment) for how the demo is protected.
+
 ```
 Question: "Show total revenue by year."
 
@@ -21,7 +25,7 @@ The project was built in two versions, on purpose:
 
 ## How it works
 
-The pipeline is a LangGraph `StateGraph` (`src/graph.py`). The agents are nodes and share a single `State` object, which holds the question, the SQL, the data, the report, the chart and the number of LLM calls.
+The pipeline is a LangGraph `StateGraph` (`src/graph.py`). The agents are nodes and share a single `State` object, which holds the question, the SQL, the data, the report, the chart, the number of LLM calls and the conversation history.
 
 ```
 START -> sql -> report -------------> END
@@ -57,6 +61,26 @@ Gets the question and the result table and writes a short answer for a business 
 
 Decides whether a chart would help and returns a small spec through structured output, for example `{"type": "bar", "x": "Year", "y": "Revenue"}`. The spec is checked before it is used: the column names must exist and `y` must be numeric.
 
+### 4. Conversation memory
+
+The graph is compiled with a LangGraph **checkpointer** (`InMemorySaver`). After every step it saves the state under a `thread_id`. The next question in the same thread starts from that saved state instead of an empty one. This makes follow-up questions work:
+
+```
+"Top 3 products by revenue in 2023?"
+"And for 2022?"     -> same query, year changed to 2022
+```
+
+Each turn adds `{question, sql}` to a `history` list in the state. The SQL agent gets the last 5 turns as earlier chat messages, so it sees the previous questions and the final SQL for each one. It does not get the full tool calls, because the final SQL already holds the tables, joins and filters it needs.
+
+Some fields must be reset at the start of every turn (`turn_input()` in `src/graph.py`):
+
+- `chart` is set to `None`. Otherwise, when the chart node is skipped, the chart from the previous question would stay in the state.
+- `llm_calls` is reset with `Overwrite(0)`. Its `operator.add` reducer would otherwise keep adding across turns.
+
+The state holds a pandas `DataFrame`, which the default msgpack serializer cannot store, so the checkpointer uses `JsonPlusSerializer(pickle_fallback=True)`.
+
+In the Streamlit app every chat is its own thread. The sidebar lists past chats. Clicking one switches back to its `thread_id`, so the agent continues with that chat's memory. **New chat** starts a new thread. Memory lives in RAM only and is lost when the app stops.
+
 ---
 
 ## Observability with Langfuse
@@ -68,7 +92,7 @@ Each trace also carries metadata (`pipeline_config()` in `src/graph.py`):
 | Field | Value | Used for |
 |---|---|---|
 | `user_id` | `cli`, `streamlit-anonymous`, `eval` | Cost and traces per user |
-| `session_id` | One id per Streamlit browser session | Groups the questions of one conversation |
+| `session_id` | One id per chat, also used as the checkpointer `thread_id` | Groups the questions of one conversation |
 | `tags` | `sql_analyst` + `cli` / `streamlit` / `eval` | Filtering, e.g. hiding eval runs |
 | `metadata` | `app_name`, `model` | Comparing traces across models |
 
@@ -145,7 +169,7 @@ python -m evals.run --limit 5                     # quick local check, no datase
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<alperenkurtt>/sql-analyst-agent.git
+git clone https://github.com/alperenkurtt/sql-analyst-agent.git
 cd sql-analyst-agent
 
 python -m venv venv
@@ -157,18 +181,9 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Download the database
+The database (`data/northwind.db`, about 24 MB) is included in the repository. It is the SQLite version of Northwind from [jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3).
 
-The database is not included in this repository. Download the SQLite version of Northwind from [jpwhite3/northwind-SQLite3](https://github.com/jpwhite3/northwind-SQLite3) and put it in the `data/` folder:
-
-```bash
-mkdir data
-curl -L -o data/northwind.db https://github.com/jpwhite3/northwind-SQLite3/raw/main/dist/northwind.db
-```
-
-The file is about 24 MB. The final path must be `data/northwind.db`.
-
-### 3. Add your API keys
+### 2. Add your API keys
 
 The project uses [OpenRouter](https://openrouter.ai), so you can switch between models with one setting, and [Langfuse](https://cloud.langfuse.com) for tracing (the free tier is enough). Copy the example file and add your keys:
 
@@ -184,7 +199,9 @@ LANGFUSE_SECRET_KEY=sk-lf-...
 
 The default model is `openai/gpt-4o-mini`. To use another model, add `MODEL_NAME=...` to `.env`.
 
-### 4. Run it
+`DEMO_ACCESS_CODE` and `MAX_QUESTIONS_PER_SESSION` are only needed for a public deploy. If `DEMO_ACCESS_CODE` is empty, the app opens without an access code.
+
+### 3. Run it
 
 **Web app (Streamlit):**
 
@@ -202,6 +219,20 @@ Tokens, cost, latency and every agent step are visible in the run's trace in Lan
 
 ---
 
+## Deployment
+
+The demo runs on [Streamlit Community Cloud](https://streamlit.io/cloud) and is deployed from the `v2` branch. API keys are stored in Streamlit's **Secrets** panel, not in the repository. Streamlit passes them to the app as environment variables, and `config/settings.py` reads them the same way it reads `.env` locally.
+
+Every question costs money, because the agents run on a paid model. A public link with no limits could be used by anyone, so the demo has three layers of protection:
+
+| Layer | How it works |
+|---|---|
+| Access code | `check_access()` in `app.py` asks for `DEMO_ACCESS_CODE` before anything else is shown. `st.stop()` ends the script until the code is correct, so the pipeline cannot run without it. The code is compared with `hmac.compare_digest`. |
+| Question limit | Each session can ask at most `MAX_QUESTIONS_PER_SESSION` questions (default 5), counted across all chats, so **New chat** does not reset it. The sidebar shows how many are left, and the input is disabled when the limit is reached. |
+| Spending cap | The demo uses its own OpenRouter API key with a credit limit. Once the limit is used, OpenRouter rejects requests. This is the real protection: the session limit only discourages overuse, since a page refresh starts a new session. |
+
+---
+
 ## Project structure
 
 ```
@@ -212,7 +243,7 @@ Tokens, cost, latency and every agent step are visible in the run's trace in Lan
 │   └── llm.py              Shared LLM client and Langfuse client/handler
 ├── src/
 │   ├── main.py             Runs the full pipeline from the command line
-│   ├── graph.py            LangGraph pipeline and trace config (user, session, tags)
+│   ├── graph.py            LangGraph pipeline, checkpointer and trace config
 │   ├── state.py            Shared state passed between agents
 │   ├── agents/
 │   │   ├── sql_agent.py    Tool-calling agent that writes the SQL
@@ -227,7 +258,7 @@ Tokens, cost, latency and every agent step are visible in the run's trace in Lan
 │   ├── experiment.py       Runs a Langfuse experiment with all scores
 │   └── judge.py            LLM-as-judge for report quality
 └── data/
-    └── northwind.db        (download separately, see above)
+    └── northwind.db        Northwind sample database (SQLite)
 ```
 
 ---
@@ -244,5 +275,5 @@ The agent can only read the database. This is enforced in two places:
 ## Roadmap
 
 - **v1:** from-scratch agents, custom tool loop, eval set, Streamlit UI
-- **v2 (this version):** LangChain + LangGraph rebuild, Langfuse tracing, datasets, experiments and LLM-as-judge
-- **Next:** harder eval questions, conversation memory with a LangGraph checkpointer, deploy with FastAPI and Docker, RAG over a business glossary
+- **v2 (this version):** LangChain + LangGraph rebuild, Langfuse tracing, datasets, experiments, LLM-as-judge, conversation memory and a public demo on Streamlit Community Cloud
+- **Next:** harder eval questions, persistent memory (`SqliteSaver`), a FastAPI backend in Docker, RAG over a business glossary
